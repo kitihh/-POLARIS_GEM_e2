@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- start Gazebo without GUI -->
+  <arg name="use_rviz" default="false"/>
+  <arg name="velodyne_points" default="true"/>
+  
+  <!-- simulation launch file -->
+  <include file="$(find gem_gazebo)/launch/gem_gazebo_rviz.launch">
+    <arg name="use_rviz" value="$(arg use_rviz)"/>
+    <arg name="velodyne_points" value="$(arg velodyne_points)"/>
+  </include>
+
+  <!-- launch the node to be tested -->
+  <node pkg="gem_pure_pursuit_sim" type="pure_pursuit_sim.py" name="pure_pursuit_sim_node" output="screen"/>
+
+  <!-- launch the test -->
+  <test test-name="test_ct_error" pkg="gem_pure_pursuit_sim" type="test_ct_error.py" time-limit="120.0"/>
+</launch>

@@ -25,6 +25,7 @@ from ackermann_msgs.msg import AckermannDrive
 from geometry_msgs.msg import Twist, Vector3
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float32
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
 # Gazebo Headers
@@ -50,8 +51,8 @@ class PurePursuit(object):
         self.ackermann_msg.speed                   = 0.0 
         self.ackermann_msg.steering_angle          = 0.0
 
-        self.ackermann_pub = rospy.Publisher('/gem/ackermann_cmd', AckermannDrive, queue_size=1)
-
+        self.ackermann_pub   = rospy.Publisher('/gem/ackermann_cmd', AckermannDrive, queue_size=1)
+        self.ct_error_pub    = rospy.Publisher('/gem/ct_error', Float32, queue_size=1)
 
     # import waypoints.csv into a list (path_points)
     def read_waypoints(self):
@@ -151,6 +152,8 @@ class PurePursuit(object):
             self.ackermann_msg.steering_angle = angle
             self.ackermann_pub.publish(self.ackermann_msg)
 
+            self.ct_error_pub.publish(Float32(ct_error))
+
             self.rate.sleep()
 
 def pure_pursuit():
@@ -165,4 +168,3 @@ def pure_pursuit():
 
 if __name__ == '__main__':
     pure_pursuit()
-

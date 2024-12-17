@@ -21,4 +21,7 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
-
+if(CATKIN_ENABLE_TESTING)
+  find_package(rostest REQUIRED)
+  add_rostest(test/pure_pursuit_test.launch)
+endif()
