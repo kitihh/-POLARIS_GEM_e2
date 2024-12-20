@@ -18,7 +18,7 @@ class TestPurePursuitCTError(unittest.TestCase):
         
         rospy.Subscriber('/gem/ct_error', Float32, self.ct_error_callback)
         
-        rospy.wait_for_service('/gazebo/get_model_state')
+        rospy.wait_for_service('/gazebo/get_model_state', timeout=60)
         self.get_model_state = rospy.ServiceProxy('/gazebo/get_model_state', GetModelState)
 
     def ct_error_callback(self, msg):
