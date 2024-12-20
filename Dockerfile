@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
 
-# Creating builder image
-FROM ros:noetic-ros-base-focal AS builder
+# Use Ubuntu 20.04 as the base image
+FROM ubuntu:20.04
 
-# Setting build arguments
+# Setiing build arguments
+ARG BUILDKIT_INLINE_CACHE=1
 ARG USER=ros
 ARG UID=1000
 ARG GID=1000
@@ -18,6 +19,9 @@ ARG CURL_VERSION="7.68.0-1ubuntu2.25"
 ARG GIT_VERSION="1:2.25.1-1ubuntu3.13"
 ARG BUILD_ESSENTIAL_VERSION="12.8ubuntu1.1"
 
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Setting labels for metadata
 LABEL maintainer="Kirill Tihhonov" \
       version="1.0.0" \
@@ -30,8 +34,21 @@ ENV TZ=UTC \
     LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
     LC_ALL=en_US.UTF-8
-    
+
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# Combine RUN commands and use build cache
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
+    curl=${CURL_VERSION} \
+    git=${GIT_VERSION} \
+    build-essential=${BUILD_ESSENTIAL_VERSION} \
+    gnupg2 \
+    lsb-release \
+    sudo \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Creating non root user
 RUN groupadd -g ${GID} ${USER} && \
@@ -39,66 +56,19 @@ RUN groupadd -g ${GID} ${USER} && \
     echo "${USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USER} && \
     chmod 0440 /etc/sudoers.d/${USER}
 
-# Installing build dependencies with cache mounts
+# Add ROS repository and install ROS packages in a single layer
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-    curl=${CURL_VERSION} \
-    git=${GIT_VERSION} \
-    build-essential=${BUILD_ESSENTIAL_VERSION} \
-    ros-${ROS_DISTRO}-ackermann-msgs \
-    ros-${ROS_DISTRO}-geometry2 \
-    ros-${ROS_DISTRO}-hector-gazebo \
-    ros-${ROS_DISTRO}-hector-models \
-    ros-${ROS_DISTRO}-jsk-rviz-plugins \
-    ros-${ROS_DISTRO}-ros-control \
-    ros-${ROS_DISTRO}-ros-controllers \
-    ros-${ROS_DISTRO}-velodyne-simulator \
+    sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list' && \
+    curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add - && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ros-${ROS_DISTRO}-desktop-full \
     python3-rosdep \
     python3-rosinstall \
     python3-rosinstall-generator \
     python3-wstool \
     python3-catkin-tools \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
-
-# Updating rosdep
-RUN rosdep update
-
-# Setting up and building workspace
-WORKDIR ${WORKSPACE_ROOT}/src
-RUN git clone -b ${REPO_BRANCH} --depth 1 ${REPO_URL} 
-WORKDIR ${WORKSPACE_ROOT}
-RUN bash -c "source /opt/ros/${ROS_DISTRO}/setup.bash && catkin_make -j$(nproc)"
-
-# Runtime stage
-FROM ros:noetic-ros-base-focal
-
-# Setting build arguments
-ARG USER=ros
-ARG UID=1000
-ARG GID=1000
-ARG ROS_DISTRO=noetic
-ARG WORKSPACE_ROOT=/home/ros/workspace
-ARG DEBIAN_FRONTEND=noninteractive
-
-# Setting environment variables
-ENV ROS_ROOT=/opt/ros/${ROS_DISTRO}
-ENV WORKSPACE_ROOT=${WORKSPACE_ROOT}
-ENV PATH=${WORKSPACE_ROOT}/devel/bin:${PATH}
-ENV PYTHONPATH=${WORKSPACE_ROOT}/devel/lib/python3/dist-packages:${PYTHONPATH}
-ENV TZ=UTC
-
-# Creating non root user
-RUN groupadd -g ${GID} ${USER} && \
-    useradd -m -u ${UID} -g ${GID} -s /bin/bash ${USER} && \
-    echo "${USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USER} && \
-    chmod 0440 /etc/sudoers.d/${USER}
-
-# Installing runtime dependencies
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-ackermann-msgs \
     ros-${ROS_DISTRO}-geometry2 \
     ros-${ROS_DISTRO}-hector-gazebo \
@@ -110,21 +80,23 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Coping artifacts from builder
-COPY --from=builder --chown=${USER}:${USER} ${WORKSPACE_ROOT}/devel ${WORKSPACE_ROOT}/devel
-COPY --from=builder --chown=${USER}:${USER} ${WORKSPACE_ROOT}/src ${WORKSPACE_ROOT}/src
+# Initialize rosdep
+RUN rosdep init && rosdep update
 
-# Creating and seting up volumes
-RUN mkdir -p ${WORKSPACE_ROOT}/logs ${WORKSPACE_ROOT}/data && \
-    chown -R ${USER}:${USER} ${WORKSPACE_ROOT}
+# Create workspace directory and clone repository
+WORKDIR ${WORKSPACE_ROOT}/src
+RUN git clone -b ${REPO_BRANCH} --depth 1 ${REPO_URL} 
 
-VOLUME ["${WORKSPACE_ROOT}/logs", "${WORKSPACE_ROOT}/data"]
-
-# Sourcing ROS environment in bashrc
-RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /home/${USER}/.bashrc && \
-    echo "source ${WORKSPACE_ROOT}/devel/setup.bash" >> /home/${USER}/.bashrc
-
-# Switch to non root user and start command
-USER ${USER}
+# Build the workspace using multiple cores
 WORKDIR ${WORKSPACE_ROOT}
-CMD ["bash"]
+RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make -j$(nproc)"
+
+# Add source commands to bashrc
+RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc && \
+    echo "source /root/gem_ws/devel/setup.bash" >> /root/.bashrc
+
+# Set the working directory
+WORKDIR ${WORKSPACE_ROOT}
+
+# Default command
+CMD ["/bin/bash"]
