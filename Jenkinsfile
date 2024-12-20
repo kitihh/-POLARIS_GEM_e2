@@ -48,30 +48,24 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 container('docker') {
-                    sh """
+                    sh '''
                         docker build -t ${DOCKER_IMAGE} \
                             --progress=plain \
                             --compress \
                             -f Dockerfile .
-                    """
+                    '''
                 }
             }
         }
         
         stage('Run Tests') {
-            environment {
-                WORKSPACE_ROOT = '/workspace'
-            }
             steps {
                 container('docker') {
                     sh '''
                         docker run --rm \
-                            -v "${WORKSPACE}:${WORKSPACE_ROOT}" \
                             ${DOCKER_IMAGE} \
-                            /bin/bash -c "source /opt/ros/noetic/setup.bash && \
-                                        mkdir -p ${WORKSPACE_ROOT} && \
-                                        cp -r . ${WORKSPACE_ROOT}/ && \
-                                        cd ${WORKSPACE_ROOT} && \
+                            bash -c "source /opt/ros/noetic/setup.bash && \
+                                        cd /home/ros/workspace && \
                                         catkin_make run_tests_gem_pure_pursuit_sim -j\$(nproc) && \
                                         catkin_test_results"
                     '''
@@ -83,18 +77,22 @@ pipeline {
     post {
         failure {
             emailext (
-                subject: "Build Failed: ${currentBuild.fullDisplayName}",
+                subject: "[Jenkins] Pipeline '${currentBuild.fullProjectName}' - Build #${BUILD_NUMBER} - ${currentBuild.result}",
                 body: """
-                    Build execution failed!
-                    
-                    Build: ${env.BUILD_NUMBER}
-                    Branch: ${env.GIT_BRANCH}
-                    Commit: ${env.GIT_COMMIT}
-                    Status: ${currentBuild.result}
-                    
-                    Check console output at: ${env.BUILD_URL}
+                    <h2>Build Status: ${currentBuild.result}</h2>
+                    <p>Pipeline: ${env.JOB_NAME}</p>
+                    <p>Build Number: ${env.BUILD_NUMBER}</p>
+                    <hr/>
+                    <h3>Change Log</h3>
+                    <p>Branch: ${env.GIT_BRANCH ?: 'N/A'}</p>
+                    <p>Commit: ${env.GIT_COMMIT ?: 'N/A'}</p>
+                    <hr/>
+                    <p>Check console output at <a href='${env.BUILD_URL}'>${env.BUILD_URL}</a></p>
                 """,
                 to: "${EMAIL_RECIPIENTS}",
+                from: "Jenkins CI <kirill.test.jenkins@gmail.com>",
+                replyTo: "kirill.test.jenkins@gmail.com",
+                mimeType: 'text/html',
                 attachLog: true,
                 compressLog: true
             )
